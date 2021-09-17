@@ -2,12 +2,12 @@ const url = require('url');
 const http = require('http');
 const path = require('path');
 const fs = require('fs');
-const util = require('util');
+const LimitSizeStream = require('./LimitSizeStream');
 
 const server = new http.Server();
 const uploadSizeLimit = 1048576;
 
-server.on('request', async (req, res) => {
+server.on('request', (req, res) => {
   const reqURL = new url.URL(req.url, `http://${req.headers.host}`);
   const pathname = reqURL.pathname.slice(1);
 
@@ -21,30 +21,43 @@ server.on('request', async (req, res) => {
 
   switch (req.method) {
     case 'POST':
-      const buffers = [];
-      const writeFile = util.promisify(fs.writeFile);
-      let currentSize = 0;
+      const writeStream = fs.createWriteStream(filepath, {flags: 'wx'});
+      const limitSizeStream = new LimitSizeStream({limit: uploadSizeLimit});
 
-      for await (const chunk of req) {
-        currentSize += chunk.byteLength;
-        if (currentSize < uploadSizeLimit) {
-          buffers.push(chunk);
+      writeStream.on('error', (err) => {
+        if (err.code === 'EEXIST') {
+          res.statusCode = 409;
+          res.end('File exists');
         } else {
-          res.statusCode = 413;
-          res.end();
+          res.statusCode = 500;
+          res.end('Internal error');
         }
-      }
+      });
 
-      const data = Buffer.concat(buffers).toString();
-      try {
-        await writeFile(filepath, data, {flag: 'wx'});
-      } catch (e) {
-        res.statusCode = 409;
-        res.end();
-      }
+      limitSizeStream.on('error', (err) => {
+        if (err.code === 'LIMIT_EXCEEDED') {
+          res.statusCode = 413;
+          res.end('File is too large');
+        } else {
+          res.statusCode = 500;
+          res.end('Internal error');
+        }
+        writeStream.destroy();
+        fs.unlink(filepath, () => {});
+      });
 
-      res.statusCode = 201;
-      res.end();
+      writeStream.on('finish', () => {
+        res.statusCode = 201;
+        res.end('File uploaded');
+      });
+
+      req.pipe(limitSizeStream).pipe(writeStream);
+
+      req.on('aborted', () => {
+        limitSizeStream.destroy();
+        writeStream.destroy();
+        fs.unlink(filepath, () => {});
+      });
 
       break;
 

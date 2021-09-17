@@ -5,7 +5,6 @@ const {promisify} = require('util');
 const fs = require('fs');
 
 const server = new http.Server();
-const stats = promisify(fs.access);
 const rm = promisify(fs.rm);
 
 server.on('request', (req, res) => {
@@ -22,7 +21,7 @@ server.on('request', (req, res) => {
 
   switch (req.method) {
     case 'DELETE':
-      stats(filepath).then(() => rm(filepath)).then(() => res.end()).catch((e) => {
+      rm(filepath).then(() => res.end()).catch((e) => {
         if (e.code === 'ENOENT') {
           res.statusCode = 404;
           res.end('File not found');

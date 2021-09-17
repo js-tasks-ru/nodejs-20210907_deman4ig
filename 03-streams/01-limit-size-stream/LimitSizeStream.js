@@ -12,7 +12,7 @@ class LimitSizeStream extends stream.Transform {
       this._reminder -= chunk.byteLength;
       callback(null, chunk);
     } else {
-      this.destroy(new LimitExceededError());
+      callback(new LimitExceededError());
     }
   }
 }
